@@ -1,0 +1,91 @@
+name: Android build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: "Build mode"
+        type: choice
+        options: [release, debug]
+        default: release
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false   # kalau satu varian gagal, yang lain tetap lanjut
+      matrix:
+        include:
+          # armv7: sudah terbukti jalan
+          - name: armv7
+            ndk: r10e
+            args: "--android=armeabi-v7a-hard,4.9,21"
+          # arm64 varian A: NDK r20b + clang
+          # (libSDL2.so arm64 di repo dibuat dengan NDK r20b)
+          - name: arm64-r20b-clang
+            ndk: r20b
+            args: "--android=aarch64,clang,21"
+          # arm64 varian B: NDK r10e + clang 11 dari host (saran wiki proyek)
+          - name: arm64-r10e-host
+            ndk: r10e
+            host_clang: true
+            args: "--android=aarch64,host,21"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Download Android NDK ${{ matrix.ndk }}
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-${{ matrix.ndk }}-linux-x86_64.zip
+          unzip -q android-ndk-${{ matrix.ndk }}-linux-x86_64.zip
+          echo "ANDROID_NDK_HOME=$PWD/android-ndk-${{ matrix.ndk }}" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$PWD/android-ndk-${{ matrix.ndk }}" >> "$GITHUB_ENV"
+
+      # Proyek ini masih memakai GNU libstdc++ (gnustl) dari NDK r10e,
+      # sedangkan NDK r20b sudah tidak membawanya. Salin dari r10e.
+      - name: Copy gnustl from NDK r10e into r20b
+        if: matrix.ndk == 'r20b'
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r10e-linux-x86_64.zip
+          unzip -q android-ndk-r10e-linux-x86_64.zip 'android-ndk-r10e/sources/cxx-stl/gnu-libstdc++/*' -d r10e-src
+          mkdir -p android-ndk-r20b/sources/cxx-stl
+          cp -r r10e-src/android-ndk-r10e/sources/cxx-stl/gnu-libstdc++ android-ndk-r20b/sources/cxx-stl/
+
+      - name: Install clang 11
+        if: matrix.host_clang
+        run: |
+          sudo apt-get install -y libtinfo5 || true
+          wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-11.1.0/clang+llvm-11.1.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz
+          mkdir clang11
+          tar -xf clang+llvm-11.1.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz -C clang11 --strip-components=1
+          echo "$PWD/clang11/bin" >> "$GITHUB_PATH"
+
+      - name: Configure
+        run: |
+          ./waf configure -T ${{ inputs.build_mode || 'release' }} --togles ${{ matrix.args }} --disable-warns || {
+            echo "=== config.log (bagian akhir) ==="
+            tail -n 80 build/config.log
+            exit 1
+          }
+
+      - name: Build
+        run: ./waf build
+
+      - name: List results
+        run: find build -name '*.so' | sort
+
+      - name: Upload libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: srceng-${{ matrix.name }}
+          path: build/**/*.so
+          if-no-files-found: error
+
+      - name: Upload config.log (for debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: config-log-${{ matrix.name }}
+          path: build/config.log
+          if-no-files-found: ignore
