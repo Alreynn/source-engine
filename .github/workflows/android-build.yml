@@ -17,7 +17,7 @@ jobs:
       matrix:
         include:
           - name: arm64
-            args: "--android=aarch64,4.9,21 -8"
+            args: "--android=aarch64,4.9,21"
           - name: armv7
             args: "--android=armeabi-v7a-hard,4.9,21"
     steps:
