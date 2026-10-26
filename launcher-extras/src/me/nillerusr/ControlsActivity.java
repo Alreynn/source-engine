@@ -59,6 +59,12 @@ public class ControlsActivity extends Activity implements ControlsEditorView.Lis
 		btnDuplicate = addBtn(bar, "Duplikat", new View.OnClickListener() { public void onClick(View v) { duplicateSelected(); } });
 		btnDelete = addBtn(bar, "Hapus", new View.OnClickListener() { public void onClick(View v) { deleteSelected(); } });
 		addBtn(bar, "Pengaturan", new View.OnClickListener() { public void onClick(View v) { showSettingsDialog(); } });
+		addBtn(bar, "Persegikan", new View.OnClickListener() { public void onClick(View v) {
+			profile.squareAll(TouchProfile.screenAspect(ControlsActivity.this), false);
+			dirty = true;
+			editor.invalidate();
+			Toast.makeText(ControlsActivity.this, "Semua tombol bergambar dibuat persegi.", Toast.LENGTH_SHORT).show();
+		} });
 		addBtn(bar, "Reset", new View.OnClickListener() { public void onClick(View v) { confirmReset(); } });
 		addBtn(bar, "Simpan", new View.OnClickListener() { public void onClick(View v) { save(true); } });
 		addBtn(bar, "Keluar", new View.OnClickListener() { public void onClick(View v) { onBackPressed(); } });
@@ -196,7 +202,7 @@ public class ControlsActivity extends Activity implements ControlsEditorView.Lis
 			.setPositiveButton("Reset", new DialogInterface.OnClickListener() {
 				public void onClick(DialogInterface d, int w)
 				{
-					profile.copyFrom(TouchProfile.defaults());
+					profile.copyFrom(TouchProfile.defaults(TouchProfile.screenAspect(ControlsActivity.this)));
 					dirty = true;
 					editor.setProfile(profile);
 					updateButtons(null);

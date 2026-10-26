@@ -105,6 +105,8 @@ public class TouchProfile
 	}
 
 	public final ArrayList<Btn> buttons = new ArrayList<Btn>();
+	/** Versi format file yang dibaca (profil versi 1 dibuat dengan layout bawaan yang tidak persegi). */
+	public int version = 2;
 
 	public float pitch = 90f;
 	public float yaw = 120f;
@@ -118,7 +120,12 @@ public class TouchProfile
 	// default layout (salinan dari CTouchControls::ResetToDefaults)
 	// ------------------------------------------------------------------
 
-	public static TouchProfile defaults()
+	/**
+	 * Engine membuat tombol bawaan dengan aspect = 1.0, artinya PERSEGI di layar apa pun
+	 * (y2 = y1 + lebar * (lebar_layar/tinggi_layar)). Koordinat bawaan di bawah hanya
+	 * persegi di 16:9, jadi tinggi dihitung ulang untuk rasio layar perangkat ini.
+	 */
+	public static TouchProfile defaults(float screenAspect)
 	{
 		TouchProfile p = new TouchProfile();
 		p.buttons.add(new Btn("look", "", "_look", 0.5f, 0f, 1f, 1f));
@@ -138,7 +145,36 @@ public class TouchProfile
 		p.buttons.add(new Btn("invnext", "vgui/touch/next_weap", "invnext", 0f, 0.533333f, 0.12f, 0.746667f));
 		p.buttons.add(new Btn("invprev", "vgui/touch/prev_weap", "invprev", 0f, 0.071111f, 0.12f, 0.284444f));
 		p.buttons.add(new Btn("menu", "vgui/touch/menu", "gameui_activate", 0f, 0f, 0.08f, 0.142222f));
+		p.squareAll(screenAspect, true);
 		return p;
+	}
+
+	/**
+	 * Jadikan tombol bergambar persegi (dalam piksel) di layar dengan rasio screenAspect.
+	 * @param keepHeight true: tinggi tetap, lebar menyesuaikan (dipakai untuk layout bawaan,
+	 *        yang menetapkan tinggi); false: sisi = yang lebih kecil dari lebar/tinggi saat ini.
+	 * Titik tengah dipertahankan, lalu digeser supaya tetap di dalam layar.
+	 * Area _look/_move tidak diubah.
+	 */
+	public void squareAll(float screenAspect, boolean keepHeight)
+	{
+		if (screenAspect <= 0f)
+			screenAspect = 16f / 9f;
+		for (Btn b : buttons)
+		{
+			if (b.isZone() || b.texture.length() == 0)
+				continue;
+			float cx = (b.x1 + b.x2) / 2f, cy = (b.y1 + b.y2) / 2f;
+			float wpx = (b.x2 - b.x1) * screenAspect, hpx = b.y2 - b.y1; // satuan: tinggi layar
+			float side = keepHeight ? hpx : Math.min(wpx, hpx);
+			float w = side / screenAspect, h = side;
+			if (w > 1f) { w = 1f; h = w * screenAspect; }
+			if (h > 1f) { h = 1f; w = h / screenAspect; }
+			float x1 = clamp01(cx - w / 2f), y1 = clamp01(cy - h / 2f);
+			if (x1 + w > 1f) x1 = 1f - w;
+			if (y1 + h > 1f) y1 = 1f - h;
+			b.x1 = x1; b.y1 = y1; b.x2 = x1 + w; b.y2 = y1 + h;
+		}
 	}
 
 	public void copyFrom(TouchProfile o)
@@ -194,7 +230,7 @@ public class TouchProfile
 	public String serialize()
 	{
 		StringBuilder sb = new StringBuilder();
-		sb.append("TOUCHPROFILE\t1\n");
+		sb.append("TOUCHPROFILE\t2\n");
 		sb.append("pitch\t").append(f(pitch)).append('\n');
 		sb.append("yaw\t").append(f(yaw)).append('\n');
 		sb.append("sensitivity\t").append(f(sensitivity)).append('\n');
@@ -224,6 +260,8 @@ public class TouchProfile
 			return null;
 
 		TouchProfile p = new TouchProfile();
+		p.version = 1;
+		try { p.version = Integer.parseInt(lines[0].split("\t")[1].trim()); } catch (RuntimeException e) { }
 		for (int i = 1; i < lines.length; i++)
 		{
 			String[] t = lines[i].split("\t", -1);
@@ -394,13 +432,21 @@ public class TouchProfile
 			{
 				TouchProfile p = parse(readAll(f));
 				if (p != null)
+				{
+					if (p.version < 2)
+					{
+						// v1: koordinat bawaan hanya persegi di 16:9 -> ikon terdistorsi di layar lain
+						p.squareAll(screenAspect(ctx), false);
+						p.version = 2;
+					}
 					return p;
+				}
 			}
 		}
 		catch (IOException e)
 		{
 		}
-		return defaults();
+		return defaults(screenAspect(ctx));
 	}
 
 	public static void save(Context ctx, TouchProfile p) throws IOException

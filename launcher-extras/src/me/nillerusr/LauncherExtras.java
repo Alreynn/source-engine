@@ -31,6 +31,9 @@ public class LauncherExtras
 	public static final String PREF_SHADER_ON = "legacy_shaders_on";
 	public static final String PREF_SHADER_PATH = "legacy_shaders_path";
 	public static final String PREF_TOUCH_ON = "custom_touch_on";
+	public static final String PREF_PACK_ON = "legacy_pack_on";
+	public static final String PREF_PACK_URL = "legacy_pack_url";
+	public static final String PREF_PACK_SHA = "legacy_pack_sha";
 
 	private static int dp(Activity a, int v)
 	{
@@ -71,8 +74,10 @@ public class LauncherExtras
 	/** Tambahkan bagian "Shader" dan "Kontrol sentuh" ke bagian bawah form launcher. */
 	public static void addViews(final Activity act, LinearLayout body, final SharedPreferences pref)
 	{
-		// ---------- shader versi lama ----------
-		body.addView(heading(act, "Shader (versi lama / pra-Anniversary)"));
+		addPackViews(act, body, pref);
+
+		// ---------- lokasi manual ----------
+		body.addView(heading(act, "Lokasi shader manual (lanjutan)"));
 		body.addView(hint(act, "Isi dengan folder yang berisi shaders/fxc/*.vcs, atau file *_dir.vpk dari salinan "
 			+ "game versi lama milikmu sendiri. Pisahkan dengan koma kalau lebih dari satu. "
 			+ "Isinya dimuat lebih dulu daripada shader di folder game."));
@@ -158,6 +163,180 @@ public class LauncherExtras
 		});
 	}
 
+
+	// ------------------------------------------------------------------
+	// paket legacy (unduh / pasang dari zip)
+	// ------------------------------------------------------------------
+
+	private static void addPackViews(final Activity act, LinearLayout body, final SharedPreferences pref)
+	{
+		body.addView(heading(act, "Paket file legacy (shader pra-Anniversary)"));
+		body.addView(hint(act, "Paket = zip berisi shaders/fxc/*.vcs (dan file lain bila perlu) dari game versi lama. "
+			+ "Launcher tidak membawa file Valve: buat paket dari salinan steam_legacy milikmu "
+			+ "(tools/make_legacy_pack.py), lalu unduh dari alamat https milikmu atau pasang dari file zip. "
+			+ "Selama aktif, isinya dimuat lebih dulu daripada file di folder game."));
+
+		final TextView status = hint(act, LegacyPack.describe(act));
+		body.addView(status);
+
+		final CheckBox cb = new CheckBox(act);
+		cb.setText("Pakai paket legacy saat Launch");
+		cb.setTextColor(0xFFFFFFFF);
+		cb.setChecked(pref.getBoolean(PREF_PACK_ON, true));
+		cb.setLayoutParams(lp(act));
+		body.addView(cb);
+		cb.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+			public void onCheckedChanged(CompoundButton v, boolean on)
+			{
+				SharedPreferences.Editor e = pref.edit();
+				e.putBoolean(PREF_PACK_ON, on);
+				e.commit();
+			}
+		});
+
+		final EditText url = new EditText(act);
+		url.setSingleLine(true);
+		url.setHint("https://... /legacy-pack.zip");
+		url.setText(pref.getString(PREF_PACK_URL, ""));
+		url.setLayoutParams(lp(act));
+		body.addView(url);
+
+		final EditText sha = new EditText(act);
+		sha.setSingleLine(true);
+		sha.setHint("SHA-256 paket (opsional, sangat disarankan)");
+		sha.setText(pref.getString(PREF_PACK_SHA, ""));
+		sha.setLayoutParams(lp(act));
+		body.addView(sha);
+
+		final Button dl = new Button(act);
+		dl.setText("Unduh & pasang paket");
+		dl.setLayoutParams(lp(act));
+		body.addView(dl);
+
+		final EditText zip = new EditText(act);
+		zip.setSingleLine(true);
+		zip.setHint("/sdcard/legacy-pack.zip");
+		zip.setLayoutParams(lp(act));
+		body.addView(zip);
+
+		final Button imp = new Button(act);
+		imp.setText("Pasang dari file zip");
+		imp.setLayoutParams(lp(act));
+		body.addView(imp);
+
+		final Button del = new Button(act);
+		del.setText("Hapus paket terpasang");
+		del.setLayoutParams(lp(act));
+		body.addView(del);
+
+		url.addTextChangedListener(new TextWatcher() {
+			public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+			public void onTextChanged(CharSequence s, int a, int b, int c) {}
+			public void afterTextChanged(Editable s)
+			{
+				SharedPreferences.Editor e = pref.edit();
+				e.putString(PREF_PACK_URL, s.toString());
+				e.commit();
+			}
+		});
+		sha.addTextChangedListener(new TextWatcher() {
+			public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+			public void onTextChanged(CharSequence s, int a, int b, int c) {}
+			public void afterTextChanged(Editable s)
+			{
+				SharedPreferences.Editor e = pref.edit();
+				e.putString(PREF_PACK_SHA, s.toString());
+				e.commit();
+			}
+		});
+
+		final LegacyPack.Progress progress = new LegacyPack.Progress() {
+			public void onMessage(final String m)
+			{
+				act.runOnUiThread(new Runnable() { public void run() { status.setText(m); } });
+			}
+		};
+
+		final Runnable[] busy = new Runnable[1]; // penanda "sedang bekerja"
+		dl.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View v)
+			{
+				if (busy[0] != null)
+					return;
+				final String u = url.getText().toString(), h = sha.getText().toString();
+				if (LegacyPack.normalizeSha(h).length() == 0)
+					Toast.makeText(act, "Tanpa SHA-256 isi unduhan tidak bisa diverifikasi.", Toast.LENGTH_LONG).show();
+				runBackground(act, busy, status, progress, new BgTask() {
+					public String run() throws IOException
+					{
+						int n = LegacyPack.downloadAndInstall(act, u, h, progress);
+						return "Selesai: " + n + " file. " + LegacyPack.describe(act);
+					}
+				});
+			}
+		});
+		imp.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View v)
+			{
+				if (busy[0] != null)
+					return;
+				final String z = zip.getText().toString().trim();
+				runBackground(act, busy, status, progress, new BgTask() {
+					public String run() throws IOException
+					{
+						int n = LegacyPack.installFromFile(act, new File(z), progress);
+						return "Selesai: " + n + " file. " + LegacyPack.describe(act);
+					}
+				});
+			}
+		});
+		del.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View v)
+			{
+				LegacyPack.remove(act);
+				status.setText(LegacyPack.describe(act));
+			}
+		});
+	}
+
+	private interface BgTask
+	{
+		String run() throws IOException;
+	}
+
+	private static void runBackground(final Activity act, final Runnable[] busy, final TextView status,
+		final LegacyPack.Progress pr, final BgTask task)
+	{
+		busy[0] = new Runnable() { public void run() {} };
+		pr.onMessage("Memulai...");
+		new Thread(new Runnable() {
+			public void run()
+			{
+				String result;
+				try
+				{
+					result = task.run();
+				}
+				catch (IOException e)
+				{
+					result = "Gagal: " + e.getMessage();
+				}
+				catch (RuntimeException e)
+				{
+					result = "Gagal: " + e;
+				}
+				final String r = result;
+				act.runOnUiThread(new Runnable() {
+					public void run()
+					{
+						busy[0] = null;
+						status.setText(r);
+					}
+				});
+			}
+		}).start();
+	}
+
 	// ------------------------------------------------------------------
 
 	private static boolean hasVcs(File dir)
@@ -223,25 +402,32 @@ public class LauncherExtras
 		SharedPreferences pref = act.getSharedPreferences("mod", 0);
 		String argv = baseArgv == null ? "" : baseArgv.trim();
 
+		ArrayList<String> vpks = new ArrayList<String>();
+
 		if (pref.getBoolean(PREF_SHADER_ON, false))
 		{
 			StringBuilder why = new StringBuilder();
 			ArrayList<String> ok = validShaderPaths(pref.getString(PREF_SHADER_PATH, ""), why);
 			if (ok.isEmpty())
-			{
-				Toast.makeText(act, "Shader lama tidak dipakai:\n" + why, Toast.LENGTH_LONG).show();
-			}
+				Toast.makeText(act, "Lokasi shader manual tidak dipakai:\n" + why, Toast.LENGTH_LONG).show();
 			else
+				vpks.addAll(ok);
+		}
+
+		// paket legacy terpasang (folder files/legacy_pack, tanpa spasi/koma di path)
+		if (pref.getBoolean(PREF_PACK_ON, true) && LegacyPack.isInstalled(act))
+			vpks.add(LegacyPack.dir(act).getPath());
+
+		if (!vpks.isEmpty())
+		{
+			StringBuilder j = new StringBuilder();
+			for (String v : vpks)
 			{
-				StringBuilder j = new StringBuilder();
-				for (String s : ok)
-				{
-					if (j.length() > 0)
-						j.append(',');
-					j.append(s);
-				}
-				intent.putExtra("vpk", j.toString());
+				if (j.length() > 0)
+					j.append(',');
+				j.append(v);
 			}
+			intent.putExtra("vpk", j.toString());
 		}
 
 		if (pref.getBoolean(PREF_TOUCH_ON, false))
