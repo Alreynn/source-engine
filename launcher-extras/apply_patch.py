@@ -98,7 +98,7 @@ def copy_sources():
     dst = os.path.join(LAUNCHER, "src", "me", "nillerusr")
     os.makedirs(dst, exist_ok=True)
     for name in ("TouchProfile.java", "ControlsEditorView.java",
-                 "ControlsActivity.java", "LauncherExtras.java"):
+                 "ControlsActivity.java", "LauncherExtras.java", "LegacyPack.java"):
         shutil.copyfile(os.path.join(srcdir, name), os.path.join(dst, name))
         print("ok  salin", name)
 
